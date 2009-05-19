@@ -51,6 +51,9 @@
 %%   See gen_server.
 %% @type callerRef() = {pid(), reference()}. See gen_server.
 %%
+
+%% This version debugged/modified by Andrew Thompson (andrew@hijacked.us)
+%% for SpiceCSM
 -module(gen_leader).
 
 % Time between rounds of query from the leader
@@ -146,6 +149,7 @@ behaviour_info(_Other) ->
 %%
 %% @doc Starts a gen_leader process without linking to the parent.
 %%
+% ADT - don't allow an empty candidate list
 start(_Name, [], _Workers, _Mod, _Arg, _Options) ->
 	{error, nocandidates};
 start(Name, CandidateNodes, Workers, Mod, Arg, Options) when is_atom(Name) ->
@@ -172,6 +176,7 @@ start(Name, CandidateNodes, Workers, Mod, Arg, Options) when is_atom(Name) ->
 %% <p>The list of candidates needs to be known from the start. Workers 
 %% can be added at runtime.</p>
 %% @end
+% ADT - don't allow an empty candidate list
 start_link(_Name, [], _Workers, _Mod, _Arg, _Options) ->
 	{error, nocandidates};
 start_link(Name, CandidateNodes, Workers, 
@@ -320,6 +325,7 @@ reply({To, Tag}, Reply) ->
 %%% loop is entered.
 %%% ---------------------------------------------------
 %%% @hidden 
+% ADT - R13B passes {local, Name} or {global, Name} instead of just Name
 init_it(Starter, Parent, {local, Name}, Mod, {CandidateNodes, Workers, Arg}, Options) ->
     init_it(Starter, Parent, Name, Mod,
 	    {CandidateNodes, Workers, Arg}, Options); % ADT - R13B compatability
@@ -370,6 +376,7 @@ init_it(Starter,Parent,Name,Mod,{CandidateNodes,Workers,Arg},Options) ->
 		      candidate, NewE,{init})
 		end;
 	{{ok, State}, false} ->
+	  % ADT - support for dynamic workers
 		io:format("new worker~n", []),
 		% broadcast to all the candidate nodes we know about
 	    proc_lib:init_ack(Starter, {ok, self()}),
@@ -620,6 +627,7 @@ loop(#server{parent = Parent,
 			    NewE = mon_node(E#election{down = E#election.down -- [node(From)]},
 						 From),
 			    {ok,Synch,NewState} = Mod:elected(State,NewE),
+			    % ADT - send the candidate and worker lists so they can be synchronized
 			    From ! {ldr,Synch,E#election.candidate_nodes, E#election.worker_nodes,
 						E#election.elid,self()},
 			    loop(Server#server{state = NewState},Role,NewE,Msg);	
@@ -643,12 +651,14 @@ loop(#server{parent = Parent,
 			    NewE = mon_node(E#election{down = E#election.down -- [node(From)]},
 						 From),
 			    {ok,Synch,NewState} = Mod:elected(State,NewE),
+			    % ADT - send the candidate and worker lists so they can be synchronized
 			    From ! {ldr,Synch,E#election.candidate_nodes, E#election.worker_nodes,
 						E#election.elid,self()},
 			    loop(Server#server{state = NewState},Role,NewE,Msg);	
 			false ->
 			    loop(Server,Role,E,Msg)
 		    end;
+		% ADT - support for dynamic workers
 		{workerStart,From} ->
 			case self() == E#election.leader of
 				true ->
@@ -804,6 +814,7 @@ system_terminate(Reason, _Parent, _Debug, [_Mode, Server, Role, E]) ->
 %% @hidden 
 system_code_change([Mode, Server, Role, E], _Module, _OldVsn,
 	{add_worker, Worker}) ->
+	% ADT - using code_change to add a dynamic worker to the shared list of workers
 	NewE = E#election{worker_nodes = lists:umerge(E#election.worker_nodes,
 			[Worker])},
 	io:format("Added worker ~p to election state for ~p~n", [Worker,
@@ -942,6 +953,7 @@ handle_msg(Msg,
 
 handle_common_reply(Reply, Msg, Server, Role, E) ->
     case Reply of
+	% ADT - support for noreply replies from eg. gen_cast
 	{noreply, NState} -> 
 		NewServer = handle_debug(Server#server{state = NState},
 						Role, E, Reply),
@@ -1191,7 +1203,7 @@ hasBecomeLeader(E,Server,Msg) ->
 % Atomicity: This approach is safe as long as there is only 
 % one gen_leader running per node.
 %
-% Modified by Andrew Thompson to use the locally registered
+% ADT - modified to use the locally registered
 % name in addition to the nodename to allow multiple gen_leaders
 % per node
 %
