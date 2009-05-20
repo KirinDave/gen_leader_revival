@@ -362,6 +362,10 @@ reply({To, Tag}, Reply) ->
 %%% loop is entered.
 %%% ---------------------------------------------------
 %%% @hidden
+init_it(Starter, Parent, {local, Name}, Mod, {CandidateNodes, Workers, Arg}, Options) ->
+    %% R13B passes {local, Name} instead of just Name
+    init_it(Starter, Parent, Name, Mod,
+            {CandidateNodes, Workers, Arg}, Options);
 init_it(Starter, self, Name, Mod, {CandidateNodes, OptArgs, Arg}, Options) ->
     init_it(Starter, self(), Name, Mod,
             {CandidateNodes, OptArgs, Arg}, Options);
