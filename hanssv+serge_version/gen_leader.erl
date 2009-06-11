@@ -95,7 +95,8 @@
 -export([system_continue/3,
          system_terminate/4,
          system_code_change/4,
-         format_status/2
+         format_status/2,
+         worker_announce/2
         ]).
 
 -export([behaviour_info/1]).
@@ -245,6 +246,11 @@ candidates(#election{candidate_nodes = Cands}) ->
 %%
 workers(#election{worker_nodes = Workers}) ->
     Workers.
+
+%% Used by dynamically added workers.
+%% @hidden
+worker_announce(Name, Pid) ->
+  Name ! {add_worker, Pid}.
 
 %%
                                                 % Make a call to a generic server.
@@ -428,6 +434,12 @@ init_it(Starter,Parent,Name,Mod,{CandidateNodes,OptArgs,Arg},Options) ->
             end;
         {{ok, State}, false} ->
             proc_lib:init_ack(Starter, {ok, self()}),
+            case lists:member(self(), Workers) of 
+              false ->
+                rpc:multicall(CandidateNodes, gen_leader, 
+                              worker_announce, [Name, node(self())]);
+              _ -> nop
+            end,
             safe_loop(#server{parent = Parent,mod = Mod,
                               state = State,debug = Debug},
                       waiting_worker, Election,{init});
@@ -811,12 +823,25 @@ loop(#server{parent = Parent,
                                   },
                             loop(Server, Role, E1,Msg)
                     end;
-                _Msg when Debug == [] ->
-                    handle_msg(Msg, Server, Role, E);
-                _Msg ->
-                    Debug1 = sys:handle_debug(Debug, {?MODULE, print_event},
-                                              E#election.name, {in, Msg}),
-                    handle_msg(Msg, Server#server{debug = Debug1}, Role, E)
+              {add_worker, WorkerNode} ->
+                case {node(self()) =:= node(self()), 
+                      lists:member(WorkerNode, E#election.worker_nodes)} of
+                  {false, _} ->
+                    loop(Server, Role, E, Msg);
+                  {true, false} ->
+                    {WNodes, DNodes} = {E#election.worker_nodes, E#election.work_down},
+                    loop(Server, Role, E#election{worker_nodes=[WorkerNode|WNodes],
+                                                  work_down=[WorkerNode|DNodes]},
+                         Msg);
+                  {true, true} -> % Redundancy, meet the mirror
+                    loop(Server, Role, E, Msg)
+                end;
+              _Msg when Debug == [] ->
+                handle_msg(Msg, Server, Role, E);
+              _Msg ->
+                Debug1 = sys:handle_debug(Debug, {?MODULE, print_event},
+                                          E#election.name, {in, Msg}),
+                handle_msg(Msg, Server#server{debug = Debug1}, Role, E)
             end
     end.
 
