@@ -6,6 +6,16 @@ Numerous versions of this project exist, developed by disparate groups with diff
 to provide a new standard-library-quality module for the Erlang runtime that provides leader-election functionality without many of the
 difficulties traditionally associated with such.
 
+Which Version Should I Use?
+===========================
+
+Use the version in combined_version.
+
+What Exactly Does It Do?
+========================
+
+Let us get back to you on that.
+
 Current Participants
 ====================
 
