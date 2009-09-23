@@ -250,7 +250,8 @@ workers(#election{worker_nodes = Workers}) ->
 %% Used by dynamically added workers.
 %% @hidden
 worker_announce(Name, Pid) ->
-  Name ! {add_worker, Pid}.
+  Name ! {add_worker, Pid},
+  Name ! {heartbeat, Pid}.
 
 %%
                                                 % Make a call to a generic server.
@@ -376,7 +377,6 @@ init_it(Starter, self, Name, Mod, {CandidateNodes, OptArgs, Arg}, Options) ->
     init_it(Starter, self(), Name, Mod,
             {CandidateNodes, OptArgs, Arg}, Options);
 init_it(Starter,Parent,Name,Mod,{CandidateNodes,OptArgs,Arg},Options) ->
-
     Workers     = proplists:get_value(workers,   OptArgs, []),
     VarDir      = proplists:get_value(vardir,    OptArgs, "."),
     Interval    = proplists:get_value(heartbeat, OptArgs, ?TAU div 1000) * 1000,
@@ -415,7 +415,6 @@ init_it(Starter,Parent,Name,Mod,{CandidateNodes,OptArgs,Arg},Options) ->
             exit(Reason);
         {{ok, State}, true} ->
             NewE = startStage1(Election#election{incarn = incarnation(VarDir, Name, node())}),
-
             proc_lib:init_ack(Starter, {ok, self()}),
 
             % handle the case where there's only one candidate worker and we can't
@@ -458,7 +457,9 @@ safe_loop(#server{mod = Mod, state = State} = Server, Role,
           #election{name = Name} = E, _PrevMsg) ->
     %% Event for QuickCheck
     %% ?EVENT({Role,E}),
-    receive
+  receive
+    Msg ->
+      case Msg of
         {system, From, Req} ->
             #server{parent = Parent, debug = Debug} = Server,
             sys:handle_system_msg(Req, From, Parent, ?MODULE, Debug,
@@ -508,15 +509,19 @@ safe_loop(#server{mod = Mod, state = State} = Server, Role,
                     NewE = E
             end,
             hasBecomeLeader(NewE,Server,Msg);
-        {ldr,Synch,T,From} = Msg ->
+        {ldr,Synch,T,Workers, From} = Msg ->
             case ( (E#election.status == wait) and (E#election.elid == T) ) of
                 true ->
                     timer:cancel(E#election.cand_timer),
                     NewE1 = mon_node(E, From),
                     NewE = NewE1#election{leader = From,
                                           leadernode = node(From),
+                                          worker_nodes = Workers,
                                           status = norm,
                                           cand_timer=undefined},
+                    %io:format("Making ~p (myself) surrender. Workers should be passed as: ~p~n~n",
+                    %          [self(), NewE]),
+                    %io:format("~n~n~n ---Gen leader is forcing this instance to surrender.---~n~n~n"),
                     {ok,NewState} = Mod:surrendered(State,Synch,NewE),
                     loop(Server#server{state = NewState},surrendered,NewE,Msg);
                 false ->
@@ -559,6 +564,7 @@ safe_loop(#server{mod = Mod, state = State} = Server, Role,
                    (node(From) == E#election.leadernode)) of
                 true ->
                     NewE = E#election{ leader = From, status = worker },
+                    %io:format("~n~n~n ---Gen leader is forcing this instance to surrender.---~n~n~n"),
                     {ok,NewState} = Mod:surrendered(State,Synch,NewE),
                     loop(Server#server{state = NewState},worker,NewE,Msg);
                 false ->
@@ -650,6 +656,7 @@ safe_loop(#server{mod = Mod, state = State} = Server, Role,
                     end
             end,
             hasBecomeLeader(NewE,Server,Msg)
+      end
     end.
 
 
@@ -660,7 +667,7 @@ loop(#server{parent = Parent,
      #election{name = Name} = E, _PrevMsg) ->
     receive
         Msg ->
-
+        %io:format("NORMAL LOOP ELECTION: ~n~p~n~n", [E]),
             case Msg of
                 {system, From, Req} ->
                     sys:handle_system_msg(Req, From, Parent, ?MODULE, Debug,
@@ -680,7 +687,7 @@ loop(#server{parent = Parent,
                                      E#election{down = E#election.down -- [node(From)]},
                                      From),
                             {ok,Synch,NewState} = Mod:elected(State,NewE,node(From)),
-                            From ! {ldr,Synch,E#election.elid,self()},
+                            From ! {ldr,Synch,E#election.elid,E#election.worker_nodes, self()},
                             broadcast_candidates(NewE, Synch, [From]),
                             loop(Server#server{state = NewState},Role,NewE,Msg);
                         false ->
@@ -705,7 +712,7 @@ loop(#server{parent = Parent,
                                      E#election{down = E#election.down -- [node(From)]},
                                      From),
                             {ok,Synch,NewState} = Mod:elected(State,NewE,node(From)),
-                            From ! {ldr,Synch,NewE#election.elid,self()},
+                            From ! {ldr,Synch,NewE#election.elid, E#election.worker_nodes,self()},
                             broadcast_candidates(NewE, Synch, [From]),
                             loop(Server#server{state = NewState},Role,NewE,Msg);
                         false ->
@@ -824,16 +831,16 @@ loop(#server{parent = Parent,
                             loop(Server, Role, E1,Msg)
                     end;
               {add_worker, WorkerNode} ->
-                case {node(self()) =:= node(self()), 
-                      lists:member(WorkerNode, E#election.worker_nodes)} of
-                  {false, _} ->
-                    loop(Server, Role, E, Msg);
-                  {true, false} ->
+                % io:format("Adding worker ~p~n", [WorkerNode]),
+                case lists:member(WorkerNode, E#election.worker_nodes) of
+                  false ->
                     {WNodes, DNodes} = {E#election.worker_nodes, E#election.work_down},
+                    
                     loop(Server, Role, E#election{worker_nodes=[WorkerNode|WNodes],
                                                   work_down=[WorkerNode|DNodes]},
                          Msg);
-                  {true, true} -> % Redundancy, meet the mirror
+                  true -> % Redundancy, meet the mirror
+                    % io:format("Nothing happens here.~n"),
                     loop(Server, Role, E, Msg)
                 end;
               _Msg when Debug == [] ->
