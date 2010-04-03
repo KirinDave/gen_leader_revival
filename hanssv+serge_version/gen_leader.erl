@@ -686,9 +686,7 @@ loop(#server{parent = Parent,
                             NewE = mon_node(
                                      E#election{down = E#election.down -- [node(From)]},
                                      From),
-                            {ok,Synch,NewState} = Mod:elected(State,NewE,node(From)),
-                            From ! {ldr,Synch,E#election.elid,E#election.worker_nodes, self()},
-                            broadcast_candidates(NewE, Synch, [From]),
+                            NewState = call_elected(Mod, State, NewE, From),
                             loop(Server#server{state = NewState},Role,NewE,Msg);
                         false ->
                             From ! {notLeader,T,self()},
@@ -711,9 +709,7 @@ loop(#server{parent = Parent,
                             NewE = mon_node(
                                      E#election{down = E#election.down -- [node(From)]},
                                      From),
-                            {ok,Synch,NewState} = Mod:elected(State,NewE,node(From)),
-                            From ! {ldr,Synch,NewE#election.elid, E#election.worker_nodes,self()},
-                            broadcast_candidates(NewE, Synch, [From]),
+                            NewState = call_elected(Mod, State, NewE, From),
                             loop(Server#server{state = NewState},Role,NewE,Msg);
                         false ->
                             loop(Server,Role,E,Msg)
@@ -736,9 +732,7 @@ loop(#server{parent = Parent,
                                      E#election{work_down = E#election.work_down -- [node(From)]},
                                      From),
                             %% NewE = E#election{work_down = E#election.work_down -- [node(From)]},
-                            {ok,Synch,NewState} = Mod:elected(State,NewE,node(From)),
-                            From ! {activateWorker,T,Synch,self()},
-                            broadcast_candidates(NewE, Synch, [From]),
+                            NewState = call_elected(Mod,State,NewE,From),
                             loop(Server#server{state = NewState},Role,NewE,Msg);
                         false ->
                             loop(Server,Role,E,Msg)
@@ -1324,3 +1318,18 @@ broadcast_candidates(E, Synch, IgnoreNodes) ->
         _ ->
             ok
     end.
+
+call_elected(Mod, State, E, From) when is_pid(From) ->
+    case Mod:elected(State,E,node(From)) of
+        {ok,Synch,NewState} ->
+            From ! {ldr,Synch,E#election.elid,E#election.worker_nodes, self()},
+            broadcast_candidates(E, Synch, [From]),
+            NewState;
+        {reply, Synch, NewState} ->
+            From ! {ldr,Synch,E#election.elid,E#election.worker_nodes, self()},
+            NewState
+    end.
+
+%%     {ok,Synch,NewState} = Mod:elected(State,NewE,node(From)),
+%%     From ! {ldr,Synch,NewE#election.elid, E#election.worker_nodes,self()},
+%%     broadcast_candidates(NewE, Synch, [From]),
