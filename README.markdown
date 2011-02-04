@@ -9,7 +9,7 @@ difficulties traditionally associated with such.
 Which Version Should I Use?
 ===========================
 
-Use the version in combined_version.
+*You should not use this version!* I helped organize the glr over a year ago, but I am currently busy with other projects. A much better place to look for updated & integrated versions of this code are at [abecciu's repository](https://github.com/abecciu/gen_leader_revival). Go there.
 
 What Exactly Does It Do?
 ========================
